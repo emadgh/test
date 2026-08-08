@@ -1,4 +1,4 @@
-name: Build Jalali Tray Calendar v2
+name: Build Jalali Tray Calendar v2.1
 
 on:
   push:
@@ -10,48 +10,65 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Reconstruct and extract source archive
         shell: pwsh
         run: |
           $b64 = (Get-ChildItem chunk-* | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw }) -join ''
           [IO.File]::WriteAllBytes('source.zip', [Convert]::FromBase64String($b64))
           Expand-Archive source.zip -DestinationPath extracted -Force
-      - name: Patch Rust borrow checker issues
+
+      - name: Apply exact v2.1 sources
         shell: pwsh
         run: |
-          $path = 'extracted/JalaliTrayCalendar-Rust-v2/src/main.rs'
-          $text = Get-Content $path -Raw
-          $text = $text.Replace('add_month(app.settings.main_calendar, &mut app.year, &mut app.month, 1);', "let kind = app.settings.main_calendar;`n                    let (mut year, mut month) = (app.year, app.month);`n                    add_month(kind, &mut year, &mut month, 1);`n                    app.year = year;`n                    app.month = month;")
-          $text = $text.Replace('add_month(app.settings.main_calendar, &mut app.year, &mut app.month, -1);', "let kind = app.settings.main_calendar;`n                    let (mut year, mut month) = (app.year, app.month);`n                    add_month(kind, &mut year, &mut month, -1);`n                    app.year = year;`n                    app.month = month;")
-          $text = $text.Replace('add_month(app.settings.main_calendar, &mut app.year, &mut app.month, delta);', "let kind = app.settings.main_calendar;`n                        let (mut year, mut month) = (app.year, app.month);`n                        add_month(kind, &mut year, &mut month, delta);`n                        app.year = year;`n                        app.month = month;")
-          $oldReset = "                    let previous_main = app.settings.main_calendar;`n                    app.settings = Settings::default();`n                    if app.settings.main_calendar != previous_main {`n                        app.set_main_calendar(app.settings.main_calendar);`n                    }`n                    app.settings.save();"
-          $newReset = "                    let default_settings = Settings::default();`n                    let next_main = default_settings.main_calendar;`n                    if next_main != app.settings.main_calendar {`n                        app.set_main_calendar(next_main);`n                    }`n                    app.settings = default_settings;`n                    app.settings.save();"
-          $text = $text.Replace($oldReset, $newReset)
-          Set-Content $path $text -Encoding utf8NoBOM
-          $calendar = 'extracted/JalaliTrayCalendar-Rust-v2/src/calendar.rs'
-          $calendarText = (Get-Content $calendar -Raw).Replace('pub fn add_month(kind: CalendarKind, year:', 'pub fn add_month(_kind: CalendarKind, year:')
-          Set-Content $calendar $calendarText -Encoding utf8NoBOM
+          @'
+          import base64
+          import pathlib
+          import shutil
+          import zlib
+
+          root = pathlib.Path('extracted/JalaliTrayCalendar-Rust-v2')
+          payloads = {
+              pathlib.Path('v21/main.zb64'): root / 'src/main.rs',
+              pathlib.Path('v21/Cargo.zb64'): root / 'Cargo.toml',
+          }
+          for source, destination in payloads.items():
+              encoded = source.read_text(encoding='utf-8').strip()
+              destination.write_bytes(zlib.decompress(base64.b64decode(encoded)))
+
+          shutil.copyfile('v21/settings.rs', root / 'src/settings.rs')
+          calendar = root / 'src/calendar.rs'
+          text = calendar.read_text(encoding='utf-8')
+          text = text.replace('pub fn add_month(kind: CalendarKind, year:', 'pub fn add_month(_kind: CalendarKind, year:')
+          calendar.write_text(text, encoding='utf-8')
+          '@ | python -
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+
       - name: Test calendar conversions
         shell: pwsh
         run: |
           Set-Location extracted/JalaliTrayCalendar-Rust-v2
           cargo test --target x86_64-pc-windows-msvc
+
       - name: Build release executable
         shell: pwsh
         run: |
           Set-Location extracted/JalaliTrayCalendar-Rust-v2
           cargo build --release --target x86_64-pc-windows-msvc
+
       - name: Prepare artifact
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force artifact | Out-Null
-          Copy-Item extracted/JalaliTrayCalendar-Rust-v2/target/x86_64-pc-windows-msvc/release/jalali-tray-calendar.exe artifact/JalaliTrayCalendar.exe
+          Copy-Item extracted/JalaliTrayCalendar-Rust-v2/target/x86_64-pc-windows-msvc/release/jalali-tray-calendar.exe artifact/JalaliTrayCalendar-v2.1.exe
           Copy-Item extracted/JalaliTrayCalendar-Rust-v2/README.md artifact/README.md
           Copy-Item extracted/JalaliTrayCalendar-Rust-v2/assets/iran-calendar-events-1405.json artifact/iran-calendar-events-1405.json
+          Get-FileHash artifact/JalaliTrayCalendar-v2.1.exe -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLower() + '  JalaliTrayCalendar-v2.1.exe' } | Set-Content artifact/JalaliTrayCalendar-v2.1.exe.sha256
+
       - uses: actions/upload-artifact@v4
         with:
-          name: JalaliTrayCalendar-v2-win-x64
+          name: JalaliTrayCalendar-v2.1-win-x64
           path: artifact
