@@ -1,0 +1,39 @@
+name: Build Jalali Tray Calendar v2
+
+on:
+  push:
+    branches: [build-jalali-tray-calendar-v2-20260809]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract source archive
+        shell: pwsh
+        run: Expand-Archive source.zip -DestinationPath extracted -Force
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Test calendar conversions
+        shell: pwsh
+        run: |
+          Set-Location extracted/JalaliTrayCalendar-Rust-v2
+          cargo test --target x86_64-pc-windows-msvc
+      - name: Build release executable
+        shell: pwsh
+        run: |
+          Set-Location extracted/JalaliTrayCalendar-Rust-v2
+          cargo build --release --target x86_64-pc-windows-msvc
+      - name: Prepare artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          Copy-Item extracted/JalaliTrayCalendar-Rust-v2/target/x86_64-pc-windows-msvc/release/jalali-tray-calendar.exe artifact/JalaliTrayCalendar.exe
+          Copy-Item extracted/JalaliTrayCalendar-Rust-v2/README.md artifact/README.md
+          Copy-Item extracted/JalaliTrayCalendar-Rust-v2/assets/iran-calendar-events-1405.json artifact/iran-calendar-events-1405.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: JalaliTrayCalendar-v2-win-x64
+          path: artifact
