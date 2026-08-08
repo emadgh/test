@@ -16,6 +16,36 @@ jobs:
           $b64 = (Get-ChildItem chunk-* | Sort-Object Name | ForEach-Object { Get-Content $_.FullName -Raw }) -join ''
           [IO.File]::WriteAllBytes('source.zip', [Convert]::FromBase64String($b64))
           Expand-Archive source.zip -DestinationPath extracted -Force
+      - name: Patch Rust borrow checker issues
+        shell: pwsh
+        run: |
+          $path = 'extracted/JalaliTrayCalendar-Rust-v2/src/main.rs'
+          $text = Get-Content $path -Raw
+          $text = $text.Replace('add_month(app.settings.main_calendar, &mut app.year, &mut app.month, 1);', "let kind = app.settings.main_calendar;`n                    let (mut year, mut month) = (app.year, app.month);`n                    add_month(kind, &mut year, &mut month, 1);`n                    app.year = year;`n                    app.month = month;")
+          $text = $text.Replace('add_month(app.settings.main_calendar, &mut app.year, &mut app.month, -1);', "let kind = app.settings.main_calendar;`n                    let (mut year, mut month) = (app.year, app.month);`n                    add_month(kind, &mut year, &mut month, -1);`n                    app.year = year;`n                    app.month = month;")
+          $text = $text.Replace('add_month(app.settings.main_calendar, &mut app.year, &mut app.month, delta);', "let kind = app.settings.main_calendar;`n                        let (mut year, mut month) = (app.year, app.month);`n                        add_month(kind, &mut year, &mut month, delta);`n                        app.year = year;`n                        app.month = month;")
+          $old = @'
+                    let previous_main = app.settings.main_calendar;
+                    app.settings = Settings::default();
+                    if app.settings.main_calendar != previous_main {
+                        app.set_main_calendar(app.settings.main_calendar);
+                    }
+                    app.settings.save();
+'@
+          $new = @'
+                    let default_settings = Settings::default();
+                    let next_main = default_settings.main_calendar;
+                    if next_main != app.settings.main_calendar {
+                        app.set_main_calendar(next_main);
+                    }
+                    app.settings = default_settings;
+                    app.settings.save();
+'@
+          $text = $text.Replace($old, $new)
+          Set-Content $path $text -Encoding utf8NoBOM
+          $calendar = 'extracted/JalaliTrayCalendar-Rust-v2/src/calendar.rs'
+          $calendarText = (Get-Content $calendar -Raw).Replace('pub fn add_month(kind: CalendarKind, year:', 'pub fn add_month(_kind: CalendarKind, year:')
+          Set-Content $calendar $calendarText -Encoding utf8NoBOM
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
