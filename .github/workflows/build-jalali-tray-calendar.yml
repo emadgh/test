@@ -16,7 +16,11 @@ jobs:
       - name: Decode source archive
         shell: pwsh
         run: |
-          $b64 = Get-Content -Raw source.zip.b64
+          if (Test-Path source.part00.b64) {
+            $b64 = (Get-ChildItem source.part*.b64 | Sort-Object Name | ForEach-Object { Get-Content -Raw $_.FullName }) -join ''
+          } else {
+            $b64 = Get-Content -Raw source.zip.b64
+          }
           [IO.File]::WriteAllBytes('source.zip', [Convert]::FromBase64String($b64))
           Expand-Archive source.zip -DestinationPath extracted -Force
       - name: Install stable Rust
@@ -32,11 +36,11 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifact | Out-Null
-          Copy-Item extracted/JalaliTrayCalendar-Rust/target/x86_64-pc-windows-msvc/release/jalali-tray-calendar.exe artifact/JalaliTrayCalendar.exe
+          Copy-Item extracted/JalaliTrayCalendar-Rust/target/x86_64-pc-windows-msvc/release/jalali-tray-calendar.exe artifact/GahYar.exe
           Copy-Item extracted/JalaliTrayCalendar-Rust/README.md artifact/README.md
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
-          name: JalaliTrayCalendar-win-x64
+          name: GahYar-v2.6.5-test-win-x64
           path: artifact
           if-no-files-found: error
