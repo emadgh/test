@@ -23,6 +23,11 @@ jobs:
           }
           [IO.File]::WriteAllBytes('source.zip', [Convert]::FromBase64String($b64))
           Expand-Archive source.zip -DestinationPath extracted -Force
+      - name: Fetch unchanged app assets
+        shell: pwsh
+        run: |
+          Invoke-WebRequest 'https://raw.githubusercontent.com/emadgh/GahYar/main/icon/GahYar.ico' -OutFile 'extracted/JalaliTrayCalendar-Rust/icon/GahYar.ico'
+          Invoke-WebRequest 'https://raw.githubusercontent.com/emadgh/GahYar/main/fonts/Vazirmatn-Regular.ttf' -OutFile 'extracted/JalaliTrayCalendar-Rust/fonts/Vazirmatn-Regular.ttf'
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -31,6 +36,7 @@ jobs:
         shell: pwsh
         run: |
           Set-Location extracted/JalaliTrayCalendar-Rust
+          cargo test --target x86_64-pc-windows-msvc
           cargo build --release --target x86_64-pc-windows-msvc
       - name: Prepare artifact
         shell: pwsh
@@ -38,6 +44,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path artifact | Out-Null
           Copy-Item extracted/JalaliTrayCalendar-Rust/target/x86_64-pc-windows-msvc/release/jalali-tray-calendar.exe artifact/GahYar.exe
           Copy-Item extracted/JalaliTrayCalendar-Rust/README.md artifact/README.md
+          Get-FileHash artifact/GahYar.exe -Algorithm SHA256 | Format-List | Out-File artifact/SHA256.txt
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
