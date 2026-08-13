@@ -17,39 +17,46 @@ jobs:
       - name: Checkout GahYar 2.6.4 base
         shell: pwsh
         run: |
-          git clone --depth 1 https://github.com/emadgh/GahYar.git GahYar
+          git clone https://github.com/emadgh/GahYar.git GahYar
           Set-Location GahYar
-          git fetch --depth 1 origin 3efcef2ce7a5f8c92642094c9aaeabc208154a83
           git checkout --detach 3efcef2ce7a5f8c92642094c9aaeabc208154a83
 
-      - name: Materialize exact GahYar 2.6.5 source
+      - name: Apply exact 2.6.5 source patch
         shell: pwsh
         run: |
-          function Get-GitBlob([string]$sha, [string]$path) {
+          function Get-TextBlob([string]$sha) {
             $response = Invoke-RestMethod "https://api.github.com/repos/emadgh/GahYar/git/blobs/$sha"
             $bytes = [Convert]::FromBase64String(($response.content -replace '\s', ''))
-            $parent = Split-Path -Parent $path
-            if ($parent) { New-Item -ItemType Directory -Force $parent | Out-Null }
-            [IO.File]::WriteAllBytes($path, $bytes)
+            return [Text.Encoding]::UTF8.GetString($bytes)
           }
 
-          Get-GitBlob 'd45ac659ecfcf47f75e782a8a5f6fdb24be66fab' 'GahYar/Cargo.toml'
-          Get-GitBlob 'fcd3939841783a56ccf4efa0c442a760cdfb1c92' 'GahYar/Cargo.lock'
-          Get-GitBlob '571f430252f82d6a5ae2a03afae6e5a67dc53997' 'GahYar/app.rc'
-          Get-GitBlob '45453253e9fda4cadad5ea1d0e66314aa480edb4' 'GahYar/build.rs'
-          Get-GitBlob 'f06c80e96507591617ad1b8e5b4a749491c06526' 'GahYar/src/main.rs'
-          Get-GitBlob '226f2f36eebe19d62e0dff07f09b4d2deb56f432' 'GahYar/src/settings.rs'
-          Get-GitBlob '9940e1e7ac191ff480054c7655ac2c685c82ad09' 'GahYar/ci/main265_body.rs.gz'
+          $patch = ''
+          $patch += Get-TextBlob '0a1e2641944a17c37eabcceb0354c8b9592bfef6'
+          $patch += Get-TextBlob '82763f508b475e575e8cac5c4a5a6b2fb89cd72c'
+          $patch += Get-TextBlob 'c62fe925c619f5f9833da9ad8cd0e13afc5dbdb4'
+          $patch += Get-TextBlob '5c8782e40708141878bfaf07aa7d19fede2482ff'
+          [IO.File]::WriteAllText('GahYar-2.6.5.patch', $patch, [Text.UTF8Encoding]::new($false))
 
-          Select-String -Path GahYar/Cargo.toml -SimpleMatch 'version = "2.6.5"' | Out-Null
-          Select-String -Path GahYar/app.rc -SimpleMatch 'FILEVERSION 2,6,5,0' | Out-Null
-          Select-String -Path GahYar/src/settings.rs -SimpleMatch 'pub daily_view: bool' | Out-Null
+          $patchHash = (Get-FileHash 'GahYar-2.6.5.patch' -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($patchHash -ne 'be6c5046abecf279d66553d30186141b55dc0691f457fd340db2abe448275d96') {
+            throw "Patch integrity check failed: $patchHash"
+          }
+
+          Set-Location GahYar
+          python -c "from pathlib import Path; files=['src/main.rs','src/settings.rs','Cargo.toml','Cargo.lock','app.rc']; [(lambda p: p.write_bytes(p.read_bytes().replace(b'\r\n',b'\n')))(Path(f)) for f in files]"
+          git apply --whitespace=nowarn ../GahYar-2.6.5.patch
+
+          Select-String -Path Cargo.toml -SimpleMatch 'version = "2.6.5"' | Out-Null
+          Select-String -Path app.rc -SimpleMatch 'FILEVERSION 2,6,5,0' | Out-Null
+          Select-String -Path src/settings.rs -SimpleMatch 'pub daily_view: bool' | Out-Null
+          Select-String -Path src/main.rs -SimpleMatch 'BASE_HEIGHT_DAILY' | Out-Null
+          Select-String -Path src/main.rs -SimpleMatch 'app.step_day(delta)' | Out-Null
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Test calendar code
+      - name: Test
         working-directory: GahYar
         run: cargo test --target x86_64-pc-windows-msvc
 
@@ -62,11 +69,10 @@ jobs:
         run: |
           $exe = 'GahYar/target/x86_64-pc-windows-msvc/release/GahYar.exe'
           if (!(Test-Path $exe)) { throw 'GahYar.exe was not produced' }
-          $version = (Get-Item $exe).VersionInfo.FileVersion
-          $productVersion = (Get-Item $exe).VersionInfo.ProductVersion
-          Write-Host "FileVersion=$version ProductVersion=$productVersion"
-          if ($version -notlike '2.6.5*') { throw "Unexpected FileVersion: $version" }
-          if ($productVersion -notlike '2.6.5*') { throw "Unexpected ProductVersion: $productVersion" }
+          $info = (Get-Item $exe).VersionInfo
+          Write-Host "FileVersion=$($info.FileVersion) ProductVersion=$($info.ProductVersion)"
+          if ($info.FileVersion -notlike '2.6.5*') { throw "Unexpected FileVersion: $($info.FileVersion)" }
+          if ($info.ProductVersion -notlike '2.6.5*') { throw "Unexpected ProductVersion: $($info.ProductVersion)" }
           New-Item -ItemType Directory -Force artifact | Out-Null
           Copy-Item $exe artifact/GahYar.exe
           Get-FileHash artifact/GahYar.exe -Algorithm SHA256 | Format-List | Out-File artifact/SHA256.txt
