@@ -1,4 +1,4 @@
-name: Build Jalali Tray Calendar
+name: Build GahYar 2.6.5 test
 
 on:
   push:
@@ -13,40 +13,66 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: Decode source archive
+
+      - name: Checkout GahYar 2.6.4 base
         shell: pwsh
         run: |
-          if (Test-Path source.part00.b64) {
-            $b64 = (Get-ChildItem source.part*.b64 | Sort-Object Name | ForEach-Object { Get-Content -Raw $_.FullName }) -join ''
-          } else {
-            $b64 = Get-Content -Raw source.zip.b64
+          git clone --depth 1 https://github.com/emadgh/GahYar.git GahYar
+          Set-Location GahYar
+          git fetch --depth 1 origin 3efcef2ce7a5f8c92642094c9aaeabc208154a83
+          git checkout --detach 3efcef2ce7a5f8c92642094c9aaeabc208154a83
+
+      - name: Materialize exact GahYar 2.6.5 source
+        shell: pwsh
+        run: |
+          function Get-GitBlob([string]$sha, [string]$path) {
+            $response = Invoke-RestMethod "https://api.github.com/repos/emadgh/GahYar/git/blobs/$sha"
+            $bytes = [Convert]::FromBase64String(($response.content -replace '\s', ''))
+            $parent = Split-Path -Parent $path
+            if ($parent) { New-Item -ItemType Directory -Force $parent | Out-Null }
+            [IO.File]::WriteAllBytes($path, $bytes)
           }
-          [IO.File]::WriteAllBytes('source.zip', [Convert]::FromBase64String($b64))
-          Expand-Archive source.zip -DestinationPath extracted -Force
-      - name: Fetch unchanged app assets
-        shell: pwsh
-        run: |
-          Invoke-WebRequest 'https://raw.githubusercontent.com/emadgh/GahYar/main/icon/GahYar.ico' -OutFile 'extracted/JalaliTrayCalendar-Rust/icon/GahYar.ico'
-          Invoke-WebRequest 'https://raw.githubusercontent.com/emadgh/GahYar/main/fonts/Vazirmatn-Regular.ttf' -OutFile 'extracted/JalaliTrayCalendar-Rust/fonts/Vazirmatn-Regular.ttf'
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@stable
+
+          Get-GitBlob 'd45ac659ecfcf47f75e782a8a5f6fdb24be66fab' 'GahYar/Cargo.toml'
+          Get-GitBlob 'fcd3939841783a56ccf4efa0c442a760cdfb1c92' 'GahYar/Cargo.lock'
+          Get-GitBlob '571f430252f82d6a5ae2a03afae6e5a67dc53997' 'GahYar/app.rc'
+          Get-GitBlob '45453253e9fda4cadad5ea1d0e66314aa480edb4' 'GahYar/build.rs'
+          Get-GitBlob 'f06c80e96507591617ad1b8e5b4a749491c06526' 'GahYar/src/main.rs'
+          Get-GitBlob '226f2f36eebe19d62e0dff07f09b4d2deb56f432' 'GahYar/src/settings.rs'
+          Get-GitBlob '9940e1e7ac191ff480054c7655ac2c685c82ad09' 'GahYar/ci/main265_body.rs.gz'
+
+          Select-String -Path GahYar/Cargo.toml -SimpleMatch 'version = "2.6.5"' | Out-Null
+          Select-String -Path GahYar/app.rc -SimpleMatch 'FILEVERSION 2,6,5,0' | Out-Null
+          Select-String -Path GahYar/src/settings.rs -SimpleMatch 'pub daily_view: bool' | Out-Null
+
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
-      - name: Build release executable
+
+      - name: Test calendar code
+        working-directory: GahYar
+        run: cargo test --target x86_64-pc-windows-msvc
+
+      - name: Build Windows x64 release
+        working-directory: GahYar
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Verify and prepare test artifact
         shell: pwsh
         run: |
-          Set-Location extracted/JalaliTrayCalendar-Rust
-          cargo test --target x86_64-pc-windows-msvc
-          cargo build --release --target x86_64-pc-windows-msvc
-      - name: Prepare artifact
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path artifact | Out-Null
-          Copy-Item extracted/JalaliTrayCalendar-Rust/target/x86_64-pc-windows-msvc/release/jalali-tray-calendar.exe artifact/GahYar.exe
-          Copy-Item extracted/JalaliTrayCalendar-Rust/README.md artifact/README.md
+          $exe = 'GahYar/target/x86_64-pc-windows-msvc/release/GahYar.exe'
+          if (!(Test-Path $exe)) { throw 'GahYar.exe was not produced' }
+          $version = (Get-Item $exe).VersionInfo.FileVersion
+          $productVersion = (Get-Item $exe).VersionInfo.ProductVersion
+          Write-Host "FileVersion=$version ProductVersion=$productVersion"
+          if ($version -notlike '2.6.5*') { throw "Unexpected FileVersion: $version" }
+          if ($productVersion -notlike '2.6.5*') { throw "Unexpected ProductVersion: $productVersion" }
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          Copy-Item $exe artifact/GahYar.exe
           Get-FileHash artifact/GahYar.exe -Algorithm SHA256 | Format-List | Out-File artifact/SHA256.txt
-      - name: Upload executable
-        uses: actions/upload-artifact@v4
+          'GahYar 2.6.5 TEST BUILD - not released' | Out-File artifact/BUILD.txt
+
+      - uses: actions/upload-artifact@v4
         with:
           name: GahYar-v2.6.5-test-win-x64
           path: artifact
