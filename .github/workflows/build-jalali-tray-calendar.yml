@@ -30,10 +30,9 @@ jobs:
             return [Text.Encoding]::UTF8.GetString($bytes)
           }
 
-          $patch = ''
-          $patch += Get-TextBlob '0a1e2641944a17c37eabcceb0354c8b9592bfef6'
-          $patch += Get-TextBlob '82763f508b475e575e8cac5c4a5a6b2fb89cd72c'
-          $patch += Get-TextBlob 'c62fe925c619f5f9833da9ad8cd0e13afc5dbdb4'
+          $patch = (Get-TextBlob '0a1e2641944a17c37eabcceb0354c8b9592bfef6') + "`n"
+          $patch += (Get-TextBlob '82763f508b475e575e8cac5c4a5a6b2fb89cd72c') + "`n"
+          $patch += (Get-TextBlob 'c62fe925c619f5f9833da9ad8cd0e13afc5dbdb4') + "`n"
           $patch += Get-TextBlob '5c8782e40708141878bfaf07aa7d19fede2482ff'
           [IO.File]::WriteAllText('GahYar-2.6.5.patch', $patch, [Text.UTF8Encoding]::new($false))
 
